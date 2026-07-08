@@ -26,6 +26,14 @@ ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split('
 # in the Meta developer dashboard when registering the webhook URL.
 WHATSAPP_VERIFY_TOKEN = os.getenv('WHATSAPP_VERIFY_TOKEN', '')
 
+# The real Meta API credential — used later (Day 3+) to send outbound
+# WhatsApp messages via graph.facebook.com. Never log this value.
+WHATSAPP_ACCESS_TOKEN = os.getenv('WHATSAPP_ACCESS_TOKEN', '')
+
+# Identifier for the WhatsApp test number, used in the API URL when sending
+# messages: https://graph.facebook.com/{version}/{WHATSAPP_PHONE_NUMBER_ID}/messages
+WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID', '')
+
 
 # Application definition
 

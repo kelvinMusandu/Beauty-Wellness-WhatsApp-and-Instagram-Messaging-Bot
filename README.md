@@ -1,7 +1,9 @@
-# WhatsApp Salon Booking Bot
+# WhatsApp Booking Bot for Beauty & Wellness Businesses
 
-A WhatsApp-native booking system for Kenyan salons. Customers book appointments
-and pay via M-Pesa entirely within WhatsApp — no app download required.
+A WhatsApp-native booking system for Kenyan beauty & wellness businesses —
+salons, spas, barbershops, nail studios, and similar service providers.
+Customers book appointments and pay via M-Pesa entirely within WhatsApp —
+no app download required.
 
 Built in public. Follow the build log below.
 
