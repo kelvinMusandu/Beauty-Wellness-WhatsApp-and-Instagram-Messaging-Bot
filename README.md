@@ -1,13 +1,13 @@
 # WhatsApp Booking Bot for Beauty & Wellness Businesses
 
-A WhatsApp-native booking system for Kenyan beauty & wellness businesses —
+A WhatsApp-native booking system for Kenyan beauty & wellness businesses -
 salons, spas, barbershops, nail studios, and similar service providers.
-Customers book appointments and pay via M-Pesa entirely within WhatsApp —
+Customers book appointments and pay via M-Pesa entirely within WhatsApp -
 no app download required.
 
 Built in public. Follow the build log below.
 
-## Status: Day 1 — Foundation
+## Status: Day 1 - Foundation
 
 - [x] Django project scaffolded
 - [x] `webhooks` app receives GET (Meta verification) and POST (event storage)
@@ -50,5 +50,5 @@ your `WHATSAPP_VERIFY_TOKEN` in the Meta developer dashboard.
 ## Build Log
 
 - **Day 1:** Webhook endpoint verified by Meta. Incoming events stored raw
-  in `WebhookEvent`, no processing yet — proves the wire is connected before
+  in `WebhookEvent`, no processing yet - proves the wire is connected before
   building on top of it.
