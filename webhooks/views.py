@@ -6,6 +6,7 @@ import json
 import logging
 
 from django.conf import settings
+from django.db import IntegrityError
 from django.http import HttpResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -13,6 +14,24 @@ from django.views.decorators.http import require_http_methods
 from .models import WebhookEvent
 
 logger = logging.getLogger(__name__)
+
+
+def extract_message_id(payload):
+    """
+    Defensively pull the message id out of a WhatsApp webhook payload.
+
+    Not every payload has this shape — status updates, the dashboard's test
+    payload, and future webhook types may not include a "messages" list at
+    all. Uses .get() chains, not direct indexing, so an unexpected shape
+    returns None instead of raising KeyError/IndexError.
+    """
+    try:
+        entry = payload.get("entry", [])[0]
+        change = entry.get("changes", [])[0]
+        messages = change.get("value", {}).get("messages", [])
+        return messages[0].get("id") if messages else None
+    except (IndexError, AttributeError, TypeError):
+        return None
 
 
 @csrf_exempt
@@ -51,6 +70,12 @@ def _receive(request):
     Store raw data first, before validating or processing.
     This endpoint does no real work. Meta expects
     a fast 200. Parsing and replying happen in a later step (Day 3+), not here.
+
+    Duplicate handling (Day 2): WhatsApp can redeliver the same webhook on
+    retry/timeout. message_id is the hash-table "seen before" check — if we
+    already have a row with this message_id, skip creating a second one.
+    Still respond 200 either way, so Meta doesn't keep retrying a message
+    we've already handled.
     """
     try:
         payload = json.loads(request.body)
@@ -58,8 +83,20 @@ def _receive(request):
         logger.warning("Received non-JSON body on webhook POST")
         return HttpResponse(status=400)
 
-    event = WebhookEvent.objects.create(raw_payload=payload)
-    logger.info("Stored webhook event id=%s", event.id)
+    message_id = extract_message_id(payload)
+
+    if message_id and WebhookEvent.objects.filter(message_id=message_id).exists():
+        logger.info("Duplicate webhook for message_id=%s, skipping", message_id)
+        return HttpResponse(status=200)
+
+    try:
+        event = WebhookEvent.objects.create(raw_payload=payload, message_id=message_id)
+        logger.info("Stored webhook event id=%s message_id=%s", event.id, message_id)
+    except IntegrityError:
+        # Race condition: two requests with the same message_id passed the
+        # .exists() check before either had committed. The unique constraint
+        # on message_id catches what the pre-check couldn't.
+        logger.info("Duplicate webhook for message_id=%s (race), skipping", message_id)
 
     return HttpResponse(status=200)
 

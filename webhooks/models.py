@@ -6,6 +6,14 @@ class WebhookEvent(models.Model):
     raw_payload = models.JSONField()
     received_at = models.DateTimeField(auto_now_add=True)
 
+    # WhatsApp's own unique ID for a message (e.g. "wamid.HBgM..."). Not every
+    # webhook has one (status updates, some payload shapes don't include it) so
+    # this is nullable — but where it exists, it must be unique. This is the
+    # hash-table "seen before" check: null=True lets many non-message events
+    # have no id, unique=True means Django/Postgres reject a second row with
+    # the same real message_id at the database level, not just in application code.
+    message_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+
     # Set once a background worker has looked at this event (Day 3+).
     # Day 1 leaves this False for everything — no processing happens yet.
     processed = models.BooleanField(default=False)
