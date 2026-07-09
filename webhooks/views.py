@@ -38,7 +38,8 @@ def extract_message_id(payload):
 @require_http_methods(["GET", "POST"])
 def whatsapp_webhook(request):
     if request.method == "GET":
-        return _verify(request)
+        return _verify(request) # undescore in a function indicates it is a private function, 
+                                # meaning it should not be called from outside the file
     return _receive(request)
 
 
@@ -72,7 +73,7 @@ def _receive(request):
     a fast 200. Parsing and replying happen in a later step (Day 3+), not here.
 
     Duplicate handling (Day 2): WhatsApp can redeliver the same webhook on
-    retry/timeout. message_id is the hash-table "seen before" check — if we
+    retry/timeout. message_id is the hash-table "seen before" check - if we
     already have a row with this message_id, skip creating a second one.
     Still respond 200 either way, so Meta doesn't keep retrying a message
     we've already handled.
@@ -147,4 +148,97 @@ request.GET.get("hub.challenge", "")  # -> "1234567890"
 
 GET → data in the URL's query string → used for the one-time verification handshake. POST → data in the 
 request body → used for every real webhook event afterward.
+
+A race condition happens when two or more operations run concurrently (at the same time or interleaved) 
+and the outcome depends on which one happens to finish first, timing that isn't guaranteed. 
+It's a bug class specific to concurrent/parallel systems.
+
+"Race condition: two 
+requests with the same message_id passed the .exists() check before either had committed."
+
+Meta retries on any non-200 or slow response meaning that two requests can be sent and
+the check may run concurrently both could pass the check before either has written "processed"
+and we'd handle the same message twice. 
+
+How do we catch the race condition?
+if ... WebhookEvent.objects.filter(message_id=message_id).exists(). 
+This asks "have I already seen this message?" But this check and the eventual create() 
+are two separate operations, not one atomic step.
+The race window: if two webhook deliveries for the same message arrive close together, both requests 
+can run the if statement, both see "no existing row" (because neither has committed yet), and both proceed to 
+try creating a row.
+
+both attempt WebhookEvent.objects.create(...). The database itself has a unique constraint on 
+message_id (visible from the comment at line 97-99), so whichever request's INSERT lands second gets rejected 
+by the database with an IntegrityError — not because logic caught it, but because the database 
+enforces uniqueness at the storage layer, which is atomic in a way our .filter().exists() 
+check in the logic isn't.
+
+Idempotency is performing the same operation multiple times and have the same effect as performing it once. 
+Calling it once or calling it ten times with identical input leaves the system in the same end state.
+
+The message_id uniqueness check (webhooks/views.py:87-91) — before inserting, check if a row with this 
+message_id already exists; if so, skip and return 200 anyway.
+The database-level unique constraint + IntegrityError catch (webhooks/views.py:93-100) — the race-condition 
+backstop we just discussed, guaranteeing correctness even if two near-simultaneous deliveries both slip past 
+the first check.
+
+Always returning 200, even on the duplicate path, this isthe other half of idempotency: telling Meta 
+"I've got it, stop retrying" regardless of whether this particular delivery was new or a repeat. 
+If we returned an error on duplicates, Meta would just keep retrying 
+forever.
+
+Atomicity means an operation is treated as a single, indivisible unit; it either completes entirely 
+or it doesn't happen at all. There's no observable "halfway done" state that anything else can see or 
+be affected by.
+
+A single INSERT statement (like WebhookEvent.objects.create(...)) is atomic at the database level,
+the database guarantees that checking the unique constraint on message_id and actually writing the row 
+happen as one indivisible operation. 
+No other request can sneak in "between" the constraint check and the write.
+
+if we ever need multiple related writes to succeed or fail together 
+(e.g., "create the event AND update a counter AND log an action" none of which should partially 
+apply if one fails), we'd wrap them in django.db.transaction.atomic(), which extends this same 
+guarantee across multiple statements, not just one. Our current code doesn't need this yet since it 
+only performs a single create() call per request but it's the tool we'd reach for once _receive starts 
+doing more than one write per request.
+
+Big-O notation describes how an operation's cost (usually time, sometimes memory) 
+grows as the size of the input grows, not exact seconds, but the shape of the growth curve as 
+things scale.
+
+O(1) — Constant Time
+The operation takes the same number of steps no matter how large the collection is. 10 rows or 
+10 million rows, same cost.
+
+Example — hash table lookup:
+
+
+d = {"a": 1, "b": 2, ...}  # even with a million keys
+d["a"]  # still one hash computation, one jump to a slot
+
+Whether the dict has 3 keys or 3 million, computing the hash of "a" and jumping to that slot takes the 
+same number of operations. That's what "constant" means — flat, unaffected by n.
+
+O(log n) — Logarithmic Time
+The operation's cost grows, but very slowly, each additional step you take roughly cuts the remaining 
+search space in half. This is what a B-tree index (like our message_id unique constraint) does,
+"is it in the left half or the right half?" repeatedly, until you land on the answer.
+
+WebhookEvent.objects.filter(message_id=message_id).exists()
+
+This line asks the database: "search through the WebhookEvent table, does any existing row have this value?"
+
+so in O(log n) n refers to the number of rows in the table but PostgreSQL uses B-Tree index built from
+unique=True to answer withouts scanning every row one by one.
+
+B-Tree is a self-balancing, multi-way search tree data structure designed to optimize storage system 
+operations, particularly on secondary storage devices like hard drives and flash memory. 
+
+this query is instant regardless of whether it's technically O(1) or O(log n)
+the difference is invisible at this size. The distinction only starts to matter once the table has 
+millions of rows: a true hash table would still answer in one step, while the B-tree index needs a small, 
+slowly-growing number of comparisons. Neither is "slow" in practice — both are considered fast
+but they're not identical, and that's the nuance from the previous file's hash-table-vs-B-tree table.
 """
