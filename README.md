@@ -7,11 +7,14 @@ no app download required.
 
 Built in public. Follow the build log below.
 
-## Status: Day 1 - Foundation
+## Status: Day 2 - Foundation + Duplicate Handling
 
 - [x] Django project scaffolded
 - [x] `webhooks` app receives GET (Meta verification) and POST (event storage)
 - [x] Raw payloads stored immutably before any processing
+- [x] Verified live against Meta's real servers (ngrok tunnel + WABA subscription)
+- [x] Duplicate webhook deliveries detected and skipped (unique `message_id` + idempotency check)
+- [ ] Send first automated reply (Day 3)
 - [ ] State machine (Day 6–7)
 - [ ] Booking flow (Week 2)
 - [ ] M-Pesa integration (Week 3)
@@ -51,4 +54,10 @@ your `WHATSAPP_VERIFY_TOKEN` in the Meta developer dashboard.
 
 - **Day 1:** Webhook endpoint verified by Meta. Incoming events stored raw
   in `WebhookEvent`, no processing yet - proves the wire is connected before
-  building on top of it.
+  building on top of it. Full setup + debugging notes:
+  [week1/day1-meta-developer-setup-guide.md](../week1/day1-meta-developer-setup-guide.md).
+- **Day 2:** WhatsApp can redeliver the same webhook on retry or timeout.
+  Added a unique `message_id` field and a seen-before check before storing a
+  new event, so the same message never creates two rows. Verified by sending
+  an identical payload three times and confirming exactly one database row.
+  DSA notes: [week1/day2-build-notes-dedup-dsa.md](../week1/day2-build-notes-dedup-dsa.md).
