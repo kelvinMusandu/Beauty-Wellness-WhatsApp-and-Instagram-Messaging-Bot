@@ -5,6 +5,7 @@
 import json
 import logging
 
+import requests
 from django.conf import settings
 from django.db import IntegrityError
 from django.http import HttpResponse, HttpResponseForbidden
@@ -32,6 +33,56 @@ def extract_message_id(payload):
         return messages[0].get("id") if messages else None
     except (IndexError, AttributeError, TypeError):
         return None
+
+
+def extract_sender_phone(payload):
+    """
+    Defensively pull the sender's phone number out of a WhatsApp webhook
+    payload. Same shape assumptions as extract_message_id — status updates
+    and other non-message webhook types won't have this field either.
+    """
+    try:
+        entry = payload.get("entry", [])[0]
+        change = entry.get("changes", [])[0]
+        messages = change.get("value", {}).get("messages", [])
+        return messages[0].get("from") if messages else None
+    except (IndexError, AttributeError, TypeError):
+        return None
+
+
+def send_whatsapp_message(to, text):
+    """
+    Send a text message via Meta's Graph API.
+
+    Day 3: synchronous, called directly inside the webhook view. This is a
+    known simplification, not an oversight — best-practises.md #1 says build
+    the smallest working version first. Moving this to a background task
+    (Celery) happens once that infrastructure exists, Day 6-7 alongside the
+    state machine, not before it's actually needed.
+    """
+    url = f"https://graph.facebook.com/v25.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {"body": text},
+    }
+
+    response = requests.post(url, headers=headers, json=body, timeout=10)
+
+    if response.status_code == 200:
+        logger.info("Sent WhatsApp reply to %s", to)
+    else:
+        logger.warning(
+            "Failed to send WhatsApp reply to %s: status=%s body=%s",
+            to, response.status_code, response.text,
+        )
+
+    return response
 
 
 @csrf_exempt
@@ -93,6 +144,13 @@ def _receive(request):
     try:
         event = WebhookEvent.objects.create(raw_payload=payload, message_id=message_id)
         logger.info("Stored webhook event id=%s message_id=%s", event.id, message_id)
+
+        # Day 3: reply to genuine new messages only. message_id and sender
+        # are both None for status updates and other non-message webhook
+        # types, so this naturally skips those without a separate check.
+        sender = extract_sender_phone(payload)
+        if message_id and sender:
+            send_whatsapp_message(sender, "Hello")
     except IntegrityError:
         # Race condition: two requests with the same message_id passed the
         # .exists() check before either had committed. The unique constraint

@@ -15,7 +15,7 @@ class WebhookEvent(models.Model):
     message_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
 
     # Set once a background worker has looked at this event (Day 3+).
-    # Day 1 leaves this False for everything — no processing happens yet.
+    # Day 1 leaves this False for everything - no processing happens yet.
     processed = models.BooleanField(default=False)
 
     class Meta:
@@ -29,7 +29,12 @@ class WebhookEvent(models.Model):
 
 """
 My Notes:
-models.py definrs how a database table is going to look like 
+models.py defines how a database table is going to look like 
+webhook is an automated HTTP callback that allows one application to instantly 
+send real-time data to another when a specific event occurs.
+HTTP (Hypertext Transfer Protocol) is the foundational set of rules that allows web browsers 
+and servers to communicate. When you type a web address, HTTP defines how your device requests resources 
+(like text, images and videos) and how the server responds by delivering that content.
 
 this table's whole purpose is being an audit trail.
 
@@ -37,6 +42,7 @@ raw_payload — a JSONField storing the entire, untouched JSON body Meta sends o
 received_at — auto-set timestamp of when it arrived.
 processed — a boolean flag, currently unused (default=False for everything), reserved for 
 a future background worker to mark once it's handled the event.
+message_id - WhatsApp's own unique ID for a message, it is nullable but unique
 
 Raw storage of every incoming WhatsApp webhook payload.
 best practises:
