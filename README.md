@@ -7,14 +7,14 @@ no app download required.
 
 Built in public. Follow the build log below.
 
-## Status: Day 2 - Foundation + Duplicate Handling
+## Status: Day 3 - Foundation + Duplicate Handling + First Reply
 
 - [x] Django project scaffolded
 - [x] `webhooks` app receives GET (Meta verification) and POST (event storage)
 - [x] Raw payloads stored immutably before any processing
 - [x] Verified live against Meta's real servers (ngrok tunnel + WABA subscription)
 - [x] Duplicate webhook deliveries detected and skipped (unique `message_id` + idempotency check)
-- [ ] Send first automated reply (Day 3)
+- [x] First automated reply sent via Meta's Graph API, confirmed arriving on a real phone
 - [ ] State machine (Day 6–7)
 - [ ] Booking flow (Week 2)
 - [ ] M-Pesa integration (Week 3)
@@ -61,3 +61,11 @@ your `WHATSAPP_VERIFY_TOKEN` in the Meta developer dashboard.
   new event, so the same message never creates two rows. Verified by sending
   an identical payload three times and confirming exactly one database row.
   DSA notes: [week1/day2-build-notes-dedup-dsa.md](../week1/day2-build-notes-dedup-dsa.md).
+- **Day 3:** First outbound message. `send_whatsapp_message()` calls Meta's
+  Graph API directly from the webhook view (synchronous, a known
+  simplification until Celery/Redis exist). Genuine new messages get an
+  automatic "Hello" reply; status updates and duplicates correctly stay
+  silent. Also discovered status-update payloads carry their own id under
+  `statuses[0].id`, not `messages[0].id` - `extract_message_id()` doesn't
+  check that path yet, a real gap to close later. Verified with a real
+  message, not just a 200: confirmed the reply physically arrived on a phone.
