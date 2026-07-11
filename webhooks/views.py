@@ -5,7 +5,7 @@
 import json
 import logging
 
-import requests
+import requests #package used to make outbound http requests
 from django.conf import settings
 from django.db import IntegrityError
 from django.http import HttpResponse, HttpResponseForbidden
@@ -48,6 +48,19 @@ def extract_sender_phone(payload):
         return messages[0].get("from") if messages else None
     except (IndexError, AttributeError, TypeError):
         return None
+    # This catches exactly the three ways this particular chain of operations can fail 
+    # based on the three different mistakes above:
+    # IndexError — indexed into a list that turned out to be empty
+    # AttributeError — called .get() on something that isn't dict-like
+    # TypeError — indexed into something that isn't a sequence at all
+
+    # Where the except actually earns its keep is a genuinely malformed or unexpected payload shape 
+    # Meta changes something, a new webhook type gets added or a bug somewhere sends garbage. 
+    # Without the try/except, any of those would crash the entire webhook handler with a 500 error. 
+    # With it, the function just says "couldn't find a sender here ie None" and lets _receive() carry on 
+    # safely matching best-practises.md #3 treat external systems as untrusted, never assume 
+    # a payload has the shape you expect
+
 
 
 def send_whatsapp_message(to, text):
@@ -55,7 +68,7 @@ def send_whatsapp_message(to, text):
     Send a text message via Meta's Graph API.
 
     Day 3: synchronous, called directly inside the webhook view. This is a
-    known simplification, not an oversight — best-practises.md #1 says build
+    known simplification, not an oversight; best-practises.md #1 says build
     the smallest working version first. Moving this to a background task
     (Celery) happens once that infrastructure exists, Day 6-7 alongside the
     state machine, not before it's actually needed.
