@@ -19,7 +19,7 @@ class Business(models.Model):
 
 
 class Service(models.Model):
-    """What a business offers — a haircut, a manicure, a massage."""
+    """What a business offers - a haircut, a manicure, a massage."""
 
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="services")
     name = models.CharField(max_length=255)
@@ -32,7 +32,7 @@ class Service(models.Model):
 
 
 class Provider(models.Model):
-    """Who performs the service — a stylist, technician, or therapist."""
+    """Who performs the service - a stylist, technician, or therapist."""
 
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="providers")
     name = models.CharField(max_length=255)
@@ -45,7 +45,7 @@ class Provider(models.Model):
 class Customer(models.Model):
     """
     The person booking. phone is the same value that arrives as "from" in
-    WhatsApp webhook payloads — the link between a real conversation and a
+    WhatsApp webhook payloads - the link between a real conversation and a
     real booking.
     """
 
@@ -81,7 +81,7 @@ class Booking(models.Model):
     start_time = models.TimeField()
     end_time = models.TimeField()
 
-    # Captured at booking time, not read from Service.price later — if the
+    # Captured at booking time, not read from Service.price later - if the
     # business changes their prices next month, old bookings must still show
     # what the customer actually paid, not today's price.
     price_paid = models.DecimalField(max_digits=10, decimal_places=2)
@@ -97,3 +97,21 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"{self.customer}, {self.service.name} on {self.date} at {self.start_time}"
+    
+
+"""
+My Notes
+
+Two decisions worth explaining:
+
+PROTECT instead of CASCADE on every foreign key here - deleting a customer, business, service 
+or provider should never silently wipe out booking history. Matches week6/day1-schema-design.md's 
+recommended pattern exactly.
+price_paid is its own field, not derived from service.price - if the business changes prices next month 
+a booking made today still needs to show what was actually charged at the time, not today's current 
+price.
+The indexes are the same concept from Day 2's DSA notes - a B-tree index on (business, date) so 
+querying "what's booked for this business on this day" doesn't require scanning every row once the 
+table grows.
+
+"""
