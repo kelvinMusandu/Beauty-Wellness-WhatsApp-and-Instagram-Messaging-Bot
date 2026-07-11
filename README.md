@@ -7,7 +7,7 @@ no app download required.
 
 Built in public. Follow the build log below.
 
-## Status: Day 3 - Foundation + Duplicate Handling + First Reply
+## Status: Day 4-5 - Foundation + Duplicate Handling + First Reply + Database Schema
 
 - [x] Django project scaffolded
 - [x] `webhooks` app receives GET (Meta verification) and POST (event storage)
@@ -15,6 +15,7 @@ Built in public. Follow the build log below.
 - [x] Verified live against Meta's real servers (ngrok tunnel + WABA subscription)
 - [x] Duplicate webhook deliveries detected and skipped (unique `message_id` + idempotency check)
 - [x] First automated reply sent via Meta's Graph API, confirmed arriving on a real phone
+- [x] Database schema: `Business`, `Service`, `Provider`, `Customer`, `Booking`
 - [ ] State machine (Day 6–7)
 - [ ] Booking flow (Week 2)
 - [ ] M-Pesa integration (Week 3)
@@ -69,3 +70,14 @@ your `WHATSAPP_VERIFY_TOKEN` in the Meta developer dashboard.
   `statuses[0].id`, not `messages[0].id` - `extract_message_id()` doesn't
   check that path yet, a real gap to close later. Verified with a real
   message, not just a 200: confirmed the reply physically arrived on a phone.
+- **Day 4-5:** Database schema. New `bookings` app, separate from `webhooks`
+  (Meta's HTTP interface vs core domain models). Five models: `Business`,
+  `Service`, `Provider`, `Customer`, `Booking`. Booking's foreign keys use
+  `PROTECT`, not `CASCADE` - deleting a business, customer, service, or
+  provider should never silently delete booking history. `price_paid` is
+  captured at booking time, not read from `Service.price` later, so old
+  bookings show what was actually charged even if prices change afterward.
+  No separate `TimeSlot` table - available slots get computed dynamically in
+  Week 2, not stored. Verified with real linked data: created one of each
+  model, confirmed relationships work, and specifically forced a `PROTECT`
+  violation to prove deletion is actually blocked, not just assumed.
