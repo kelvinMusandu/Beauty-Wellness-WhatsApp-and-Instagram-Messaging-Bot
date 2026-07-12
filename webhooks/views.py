@@ -13,6 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import WebhookEvent
+from .state_machine import handle_message
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,23 @@ def extract_sender_phone(payload):
     # safely matching best-practises.md #3 treat external systems as untrusted, never assume 
     # a payload has the shape you expect
 
+
+
+def extract_message_text(payload):
+    """
+    Defensively pull the message body text out of a WhatsApp webhook
+    payload. Same shape assumptions as extract_message_id and
+    extract_sender_phone. Only text messages have this exact path - image,
+    location, and other message types have their content elsewhere, not
+    handled yet (Week 2+).
+    """
+    try:
+        entry = payload.get("entry", [])[0]
+        change = entry.get("changes", [])[0]
+        messages = change.get("value", {}).get("messages", [])
+        return messages[0].get("text", {}).get("body") if messages else None
+    except (IndexError, AttributeError, TypeError):
+        return None
 
 
 def send_whatsapp_message(to, text):
@@ -158,12 +176,16 @@ def _receive(request):
         event = WebhookEvent.objects.create(raw_payload=payload, message_id=message_id)
         logger.info("Stored webhook event id=%s message_id=%s", event.id, message_id)
 
-        # Day 3: reply to genuine new messages only. message_id and sender
+        # Day 6-7: reply to genuine new messages only, now driven by the
+        # state machine instead of a static "Hello". message_id and sender
         # are both None for status updates and other non-message webhook
         # types, so this naturally skips those without a separate check.
         sender = extract_sender_phone(payload)
+        text = extract_message_text(payload)
         if message_id and sender:
-            send_whatsapp_message(sender, "Hello")
+            reply, should_reply = handle_message(sender, text)
+            if should_reply:
+                send_whatsapp_message(sender, reply)
     except IntegrityError:
         # Race condition: two requests with the same message_id passed the
         # .exists() check before either had committed. The unique constraint

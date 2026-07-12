@@ -34,6 +34,10 @@ WHATSAPP_ACCESS_TOKEN = os.getenv('WHATSAPP_ACCESS_TOKEN', '')
 # messages: https://graph.facebook.com/{version}/{WHATSAPP_PHONE_NUMBER_ID}/messages
 WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID', '')
 
+# Local dev: Memurai (Redis-compatible), running as a Windows service on the
+# standard Redis port. Stores conversation state per phone number, Day 6-7+.
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+
 
 # Application definition
 

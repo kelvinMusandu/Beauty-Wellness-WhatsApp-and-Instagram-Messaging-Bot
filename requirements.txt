@@ -1,9 +1,11 @@
 asgiref==3.11.1
+async-timeout==5.0.1
 certifi==2026.6.17
 charset-normalizer==3.4.9
 Django==5.2.16
 idna==3.18
 python-dotenv==1.2.2
+redis==8.0.1
 requests==2.34.2
 sqlparse==0.5.5
 tzdata==2026.2
