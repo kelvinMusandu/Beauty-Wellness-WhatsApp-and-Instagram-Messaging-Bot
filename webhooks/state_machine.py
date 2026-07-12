@@ -160,5 +160,13 @@ A vending machine is another -
 IDLE → ITEM_SELECTED → PAYMENT_PENDING → DISPENSING 
 and it can't skip straight from IDLE to DISPENSING without passing through the states in between.
 
+def set_state(phone, state):
+    key = _session_key(phone)
+    _redis_client.hset(key, "state", state)
+    _redis_client.expire(key, SESSION_TTL_SECONDS)
 
+Two separate Redis calls: hset writes the new state, expire resets the TTL countdown. The TTL gets 
+refreshed on every write, not just once when the session is created - this is what makes an active 
+conversation immune to expiring mid-flow (each message pushes the 30-minute clock back out) while a 
+customer who genuinely walks away still resets to IDLE after half an hour of silence.
 """

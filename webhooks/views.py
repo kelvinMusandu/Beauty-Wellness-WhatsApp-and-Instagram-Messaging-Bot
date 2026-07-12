@@ -22,7 +22,7 @@ def extract_message_id(payload):
     """
     Defensively pull the message id out of a WhatsApp webhook payload.
 
-    Not every payload has this shape — status updates, the dashboard's test
+    Not every payload has this shape - status updates, the dashboard's test
     payload, and future webhook types may not include a "messages" list at
     all. Uses .get() chains, not direct indexing, so an unexpected shape
     returns None instead of raising KeyError/IndexError.
@@ -39,7 +39,7 @@ def extract_message_id(payload):
 def extract_sender_phone(payload):
     """
     Defensively pull the sender's phone number out of a WhatsApp webhook
-    payload. Same shape assumptions as extract_message_id — status updates
+    payload. Same shape assumptions as extract_message_id - status updates
     and other non-message webhook types won't have this field either.
     """
     try:
@@ -51,9 +51,9 @@ def extract_sender_phone(payload):
         return None
     # This catches exactly the three ways this particular chain of operations can fail 
     # based on the three different mistakes above:
-    # IndexError — indexed into a list that turned out to be empty
-    # AttributeError — called .get() on something that isn't dict-like
-    # TypeError — indexed into something that isn't a sequence at all
+    # IndexError - indexed into a list that turned out to be empty
+    # AttributeError - called .get() on something that isn't dict-like
+    # TypeError - indexed into something that isn't a sequence at all
 
     # Where the except actually earns its keep is a genuinely malformed or unexpected payload shape 
     # Meta changes something, a new webhook type gets added or a bug somewhere sends garbage. 
@@ -282,16 +282,16 @@ try creating a row.
 
 both attempt WebhookEvent.objects.create(...). The database itself has a unique constraint on 
 message_id (visible from the comment at line 97-99), so whichever request's INSERT lands second gets rejected 
-by the database with an IntegrityError — not because logic caught it, but because the database 
+by the database with an IntegrityError - not because logic caught it, but because the database 
 enforces uniqueness at the storage layer, which is atomic in a way our .filter().exists() 
 check in the logic isn't.
 
 Idempotency is performing the same operation multiple times and have the same effect as performing it once. 
 Calling it once or calling it ten times with identical input leaves the system in the same end state.
 
-The message_id uniqueness check (webhooks/views.py:87-91) — before inserting, check if a row with this 
+The message_id uniqueness check (webhooks/views.py:87-91) - before inserting, check if a row with this 
 message_id already exists; if so, skip and return 200 anyway.
-The database-level unique constraint + IntegrityError catch (webhooks/views.py:93-100) — the race-condition 
+The database-level unique constraint + IntegrityError catch (webhooks/views.py:93-100) - the race-condition 
 backstop we just discussed, guaranteeing correctness even if two near-simultaneous deliveries both slip past 
 the first check.
 
@@ -320,20 +320,20 @@ Big-O notation describes how an operation's cost (usually time, sometimes memory
 grows as the size of the input grows, not exact seconds, but the shape of the growth curve as 
 things scale.
 
-O(1) — Constant Time
+O(1) - Constant Time
 The operation takes the same number of steps no matter how large the collection is. 10 rows or 
 10 million rows, same cost.
 
-Example — hash table lookup:
+Example - hash table lookup:
 
 
 d = {"a": 1, "b": 2, ...}  # even with a million keys
 d["a"]  # still one hash computation, one jump to a slot
 
 Whether the dict has 3 keys or 3 million, computing the hash of "a" and jumping to that slot takes the 
-same number of operations. That's what "constant" means — flat, unaffected by n.
+same number of operations. That's what "constant" means - flat, unaffected by n.
 
-O(log n) — Logarithmic Time
+O(log n) - Logarithmic Time
 The operation's cost grows, but very slowly, each additional step you take roughly cuts the remaining 
 search space in half. This is what a B-tree index (like our message_id unique constraint) does,
 "is it in the left half or the right half?" repeatedly, until you land on the answer.
@@ -351,6 +351,41 @@ operations, particularly on secondary storage devices like hard drives and flash
 this query is instant regardless of whether it's technically O(1) or O(log n)
 the difference is invisible at this size. The distinction only starts to matter once the table has 
 millions of rows: a true hash table would still answer in one step, while the B-tree index needs a small, 
-slowly-growing number of comparisons. Neither is "slow" in practice — both are considered fast
+slowly-growing number of comparisons. Neither is "slow" in practice - both are considered fast
 but they're not identical, and that's the nuance from the previous file's hash-table-vs-B-tree table.
+
+state_at_time = get_state(sender)
+Reads this customer's current state from Redis, before anything happens to it. This single line 
+is why the two ConversationEvent rows below end up tagged consistently - it's captured once, 
+stored in a variable, and reused twice, rather than being read fresh (and getting a different answer) 
+at each point.
+
+reply, should_reply = handle_message(sender, text)
+This is the actual state machine call - everything above was setup and logging, this line is where the 
+real decision happens. It reads sender's state again internally (via its own get_state() call), decides 
+what to do, writes a new state back to Redis as a side effect and returns what to say and whether to 
+say it at all.
+
+for example:
+return "Welcome! Reply with a number to choose a service. (Real service list: Week 2)", True
+reply, should_reply = handle_message(sender, text)
+reply         # -> "Welcome! Reply with a number to choose a service. (Real service list: Week 2)"
+should_reply  # -> True
+
+
+if should_reply:
+    ConversationEvent.objects.create(
+        phone=sender,
+        direction=ConversationEvent.Direction.OUTBOUND,
+        text=reply,
+        state=state_at_time,
+    )
+    send_whatsapp_message(sender, reply)
+
+Only runs if handle_message() says there's actually something to send - this is False specifically 
+when the customer is in HUMAN_TAKEOVER, meaning the bot must stay genuinely silent. When it is true: 
+log the reply first (using the same state_at_time captured above, not a fresh read - by now Redis 
+already holds the new, post-transition state, so reading again here would tag this row wrong), then 
+actually call the Graph API to deliver it.
+
 """
