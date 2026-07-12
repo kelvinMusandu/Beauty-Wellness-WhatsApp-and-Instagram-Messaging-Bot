@@ -22,9 +22,41 @@ class WebhookEvent(models.Model):
         ordering = ['-received_at'] # orders the data model level is descending order
 
     def __str__(self):
-        return f"WebhookEvent {self.id} @ {self.received_at:%Y-%m-%d %H:%M:%S}" #  it defines 
-        # what string representation Python/Django uses when something needs to display this 
+        return f"WebhookEvent {self.id} @ {self.received_at:%Y-%m-%d %H:%M:%S}" #  it defines
+        # what string representation Python/Django uses when something needs to display this
         # object as text (admin lists, print(), logs, f-strings, etc.).
+
+
+class ConversationEvent(models.Model):
+    """
+    Both sides of a conversation, unified in one table so reconstructing what
+    actually happened is one ordered query instead of merging two tables by
+    timestamp. WebhookEvent stores the raw payload for audit purposes;
+    ConversationEvent stores the human-readable conversation itself, inbound
+    and outbound, tagged with the state it happened in.
+
+    Direction.ADMIN (a human admin replying from their own phone under
+    Coexistence) is deliberately not included yet - Coexistence isn't built,
+    and adding a new choice to this enum later is a cheap migration, not a
+    redesign. Building it now would be answering a question nothing is
+    asking yet (best-practises.md #9).
+    """
+
+    class Direction(models.TextChoices):
+        INBOUND = "inbound"    # customer -> bot
+        OUTBOUND = "outbound"  # bot -> customer
+
+    phone = models.CharField(max_length=20, db_index=True)
+    direction = models.CharField(max_length=10, choices=Direction.choices)
+    text = models.TextField()
+    state = models.CharField(max_length=30)  # the state this exchange happened in
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["phone", "created_at"])]
+
+    def __str__(self):
+        return f"{self.phone} [{self.direction}] {self.text[:40]}"
 
 
 """

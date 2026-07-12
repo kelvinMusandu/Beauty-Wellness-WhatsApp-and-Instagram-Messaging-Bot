@@ -12,8 +12,8 @@ from django.http import HttpResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from .models import WebhookEvent
-from .state_machine import handle_message
+from .models import ConversationEvent, WebhookEvent
+from .state_machine import get_state, handle_message
 
 logger = logging.getLogger(__name__)
 
@@ -183,8 +183,27 @@ def _receive(request):
         sender = extract_sender_phone(payload)
         text = extract_message_text(payload)
         if message_id and sender:
+            # Capture state BEFORE the transition, so the inbound and
+            # outbound rows below share the same tag - both belong to the
+            # same exchange, even though handle_message() will move the
+            # customer to a new state as a side effect.
+            state_at_time = get_state(sender)
+
+            ConversationEvent.objects.create(
+                phone=sender,
+                direction=ConversationEvent.Direction.INBOUND,
+                text=text or "(non-text message)",
+                state=state_at_time,
+            )
+
             reply, should_reply = handle_message(sender, text)
             if should_reply:
+                ConversationEvent.objects.create(
+                    phone=sender,
+                    direction=ConversationEvent.Direction.OUTBOUND,
+                    text=reply,
+                    state=state_at_time,
+                )
                 send_whatsapp_message(sender, reply)
     except IntegrityError:
         # Race condition: two requests with the same message_id passed the
