@@ -58,6 +58,31 @@ def set_state(phone, state):
     _redis_client.expire(key, SESSION_TTL_SECONDS)
 
 
+def resume_bot(phone):
+    """
+    Move a customer out of HUMAN_TAKEOVER, back into the automated flow.
+
+    Resumes to wherever they actually were before requesting a human, not a
+    blanket reset to IDLE - a customer one step from confirming a booking
+    shouldn't have to start over just because they needed a quick
+    clarification. Falls back to IDLE only if no prior state was saved
+    (e.g., the session expired in the meantime).
+
+    No dashboard exists yet (Week 3) - this is called from the
+    resume_bot management command for now, the honest minimal way an
+    admin can actually trigger this today.
+    """
+    key = _session_key(phone)
+    previous_state = _redis_client.hget(key, "previous_state")
+    restored_state = previous_state or State.IDLE
+
+    set_state(phone, restored_state)
+    _redis_client.hdel(key, "previous_state")
+
+    logger.info("Resumed bot for %s, restored to state %s", phone, restored_state)
+    return restored_state
+
+
 def handle_message(phone, text):
     """
     The actual state machine. Reads current state, decides the reply and
@@ -70,6 +95,12 @@ def handle_message(phone, text):
     current_state = get_state(phone)
 
     if text and text.strip().lower() in HUMAN_TAKEOVER_KEYWORDS:
+        # Save where they actually were, so resume_bot() can send them back
+        # here instead of forcing a restart. Only save it the first time -
+        # if they're already in HUMAN_TAKEOVER and say "human" again, don't
+        # overwrite the real previous_state with HUMAN_TAKEOVER itself.
+        if current_state != State.HUMAN_TAKEOVER:
+            _redis_client.hset(_session_key(phone), "previous_state", current_state)
         set_state(phone, State.HUMAN_TAKEOVER)
         logger.info("Customer %s requested human takeover from state %s", phone, current_state)
         return "Connecting you with a team member, they'll be with you shortly.", True
@@ -110,3 +141,24 @@ def handle_message(phone, text):
     logger.warning("Unrecognised state %s for %s, resetting to IDLE", current_state, phone)
     set_state(phone, State.IDLE)
     return "Something went wrong, let's start over. Reply with a number to choose a service.", True
+
+
+"""
+My Notes
+
+A state machine is a system that can be in exactly one state at a time, with defined rules for how 
+it moves between states based on input. Three parts:
+
+States - every possible situation the system can be in
+A current state - where it is right now
+Transition rules - given the current state and an input, move to a specific next state
+
+Real-world example everyone already knows: a traffic light. It's always in exactly one state 
+(red, yellow or green), never two at once, and it moves between them in a fixed, predictable order 
+based on a timer input. 
+A vending machine is another -
+IDLE → ITEM_SELECTED → PAYMENT_PENDING → DISPENSING 
+and it can't skip straight from IDLE to DISPENSING without passing through the states in between.
+
+
+"""
