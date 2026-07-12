@@ -388,4 +388,20 @@ log the reply first (using the same state_at_time captured above, not a fresh re
 already holds the new, post-transition state, so reading again here would tag this row wrong), then 
 actually call the Graph API to deliver it.
 
+A tuple is Python's simplest way to group a fixed number of values together as one object. 
+Unpacking is the feature that lets us take that group and split it back out into separate named 
+variables in one line, instead of accessing pieces by index.
+
+point = (3, 7)
+x, y = point
+
+x, y = (3, 7)
+x, y = 3, 7   # the parentheses are optional when creating a tuple like this
+
+If you don't care about one of the values, Python developers conventionally name it _:
+
+
+reply, _ = handle_message(sender, text)   # "I only need the reply text, ignore the rest"
+Not a special language feature — _ is just a legal variable name — but it's a widely recognized signal 
+to anyone reading the code that this value is intentionally being thrown away.
 """
