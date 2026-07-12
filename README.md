@@ -7,7 +7,7 @@ no app download required.
 
 Built in public. Follow the build log below.
 
-## Status: Day 4-5 - Foundation + Duplicate Handling + First Reply + Database Schema
+## Status: Day 6-7 - Foundation + Duplicate Handling + First Reply + Database Schema + State Machine
 
 - [x] Django project scaffolded
 - [x] `webhooks` app receives GET (Meta verification) and POST (event storage)
@@ -16,7 +16,7 @@ Built in public. Follow the build log below.
 - [x] Duplicate webhook deliveries detected and skipped (unique `message_id` + idempotency check)
 - [x] First automated reply sent via Meta's Graph API, confirmed arriving on a real phone
 - [x] Database schema: `Business`, `Service`, `Provider`, `Customer`, `Booking`
-- [ ] State machine (Day 6–7)
+- [x] State machine: `IDLE → CHOOSING_SERVICE → CHOOSING_PROVIDER → CHOOSING_TIME → AWAITING_PAYMENT → CONFIRMED`, plus `HUMAN_TAKEOVER` from any state, session stored in Redis (Memurai locally)
 - [ ] Booking flow (Week 2)
 - [ ] M-Pesa integration (Week 3)
 - [ ] Admin dashboard (Week 3)
@@ -24,7 +24,7 @@ Built in public. Follow the build log below.
 
 ## Stack
 
-Django · WhatsApp Cloud API · Redis (from Week 1) · PostgreSQL (from deploy) ·
+Django · WhatsApp Cloud API · Redis (Memurai locally) · PostgreSQL (from deploy) ·
 Next.js/TypeScript admin (Week 3) · Docker + GitHub Actions (Week 4)
 
 ## Engineering Principles
@@ -81,3 +81,14 @@ your `WHATSAPP_VERIFY_TOKEN` in the Meta developer dashboard.
   Week 2, not stored. Verified with real linked data: created one of each
   model, confirmed relationships work, and specifically forced a `PROTECT`
   violation to prove deletion is actually blocked, not just assumed.
+- **Day 6-7:** The state machine, and Redis for the first time (Memurai
+  locally, a native Windows Redis-compatible server - Docker Desktop's
+  Windows version requirement exceeded what this machine could support
+  without a full OS upgrade). Seven states including `HUMAN_TAKEOVER`,
+  triggered by "human," "agent," or "help" from any state, at which point
+  the bot goes genuinely silent for that customer. Content per state is
+  intentionally minimal, real service/provider/time lists are Week 2's job;
+  today built the mechanism only. Verified twice: an isolated test cycling
+  through all seven states in the shell, then a full real-world test
+  sending actual WhatsApp messages through every transition, confirmed
+  against the live Redis session state directly.
