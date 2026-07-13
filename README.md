@@ -7,7 +7,7 @@ no app download required.
 
 Built in public. Follow the build log below.
 
-## Status: Day 6-7 - Foundation + Duplicate Handling + First Reply + Database Schema + State Machine
+## Status: Day 8-9 - Foundation + State Machine + Real Service Selection
 
 - [x] Django project scaffolded
 - [x] `webhooks` app receives GET (Meta verification) and POST (event storage)
@@ -17,6 +17,9 @@ Built in public. Follow the build log below.
 - [x] First automated reply sent via Meta's Graph API, confirmed arriving on a real phone
 - [x] Database schema: `Business`, `Service`, `Provider`, `Customer`, `Booking`
 - [x] State machine: `IDLE → CHOOSING_SERVICE → CHOOSING_PROVIDER → CHOOSING_TIME → AWAITING_PAYMENT → CONFIRMED`, plus `HUMAN_TAKEOVER` from any state, session stored in Redis (Memurai locally)
+- [x] `ConversationEvent` audit log (both directions) and `resume_bot` management command to restore a customer from `HUMAN_TAKEOVER`
+- [x] `IDLE` and `CHOOSING_SERVICE` driven by real `Business`/`Service` data, not placeholder text - first real input validation (reject invalid replies, re-ask, instead of unconditionally advancing)
+- [ ] Real provider/time selection (Day 10+)
 - [ ] Booking flow (Week 2)
 - [ ] M-Pesa integration (Week 3)
 - [ ] Admin dashboard (Week 3)
@@ -91,4 +94,28 @@ your `WHATSAPP_VERIFY_TOKEN` in the Meta developer dashboard.
   today built the mechanism only. Verified twice: an isolated test cycling
   through all seven states in the shell, then a full real-world test
   sending actual WhatsApp messages through every transition, confirmed
-  against the live Redis session state directly.
+  against the live Redis session state directly. Also added `ConversationEvent`,
+  a human-readable log of both directions of every conversation (the customer's
+  messages were already stored via `WebhookEvent`, but the bot's own replies
+  weren't recorded anywhere until now), and `resume_bot`, a management command
+  that restores a customer from `HUMAN_TAKEOVER` back to wherever they actually
+  were - not a blanket reset to `IDLE` - using a single saved `previous_state`,
+  not a full undo history. Verified with a real takeover: sent "human" mid-flow,
+  confirmed the bot stayed silent through three follow-up messages including the
+  literal word "resume," then ran the management command and confirmed the
+  session was restored to the exact prior state. DSA notes:
+  [week1/day6-7-build-notes-statemachine-dsa.md](../week1/day6-7-build-notes-statemachine-dsa.md).
+- **Day 8-9:** `IDLE` and `CHOOSING_SERVICE` replaced with real logic - the
+  state machine's first branches driven by actual data instead of placeholder
+  text. New `bookings/booking_flow.py`: looks up which `Business` a
+  conversation belongs to via Meta's stable `phone_number_id` (not the
+  human-readable display number), fetches that business's active services
+  ordered by `id` for a stable display order, and formats them into a numbered
+  WhatsApp message. Also added `validate_number_choice()` - the project's
+  first real input validation. Every state before this one advanced
+  unconditionally regardless of what the customer typed; an invalid reply here
+  (empty, non-numeric, or out of range) is rejected and the customer stays in
+  `CHOOSING_SERVICE` until they answer correctly, done simply by not calling
+  `set_state()` on a bad reply. Verified against a real WhatsApp number tied to
+  a real `Business` row with three real services, not just a shell test. DSA
+  notes: [week1/day8-9-build-notes-service-selection-dsa.md](../week1/day8-9-build-notes-service-selection-dsa.md).
