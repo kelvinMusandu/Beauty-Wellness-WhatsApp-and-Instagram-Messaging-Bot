@@ -3,6 +3,14 @@ import logging
 import redis
 from django.conf import settings
 
+from bookings.booking_flow import (
+    format_service_list,
+    get_active_services,
+    get_business_by_phone_number_id,
+    validate_number_choice,
+)
+from bookings.models import Business
+
 logger = logging.getLogger(__name__)
 
 _redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -83,10 +91,16 @@ def resume_bot(phone):
     return restored_state
 
 
-def handle_message(phone, text):
+def handle_message(phone, text, business_phone_number_id=None):
     """
     The actual state machine. Reads current state, decides the reply and
     next state, writes the new state back.
+
+    business_phone_number_id identifies which Business this conversation
+    belongs to (Meta's stable ID, not the display number) - needed from
+    IDLE onward now that real service data drives the flow. Optional with
+    a None default so existing calls (and tests) that don't care about
+    business-specific content still work without every call site changing.
 
     Returns (reply_text, should_reply). should_reply is False specifically
     for HUMAN_TAKEOVER - the bot goes genuinely silent for that customer,
@@ -112,12 +126,43 @@ def handle_message(phone, text):
         return None, False
 
     if current_state == State.IDLE:
+        business = get_business_by_phone_number_id(business_phone_number_id)
+        if business is None:
+            logger.warning("No Business registered for phone_number_id=%s", business_phone_number_id)
+            return "Sorry, this number isn't set up yet. Please try again later.", True
+
+        services = get_active_services(business)
+        if not services:
+            return "Sorry, no services are available right now.", True
+
+        _redis_client.hset(_session_key(phone), "business_id", business.id)
         set_state(phone, State.CHOOSING_SERVICE)
-        return "Welcome! Reply with a number to choose a service. (Real service list: Week 2)", True
+        return format_service_list(services), True
 
     if current_state == State.CHOOSING_SERVICE:
+        business_id = _redis_client.hget(_session_key(phone), "business_id")
+        if business_id:
+            business = Business.objects.get(id=business_id)
+        else:
+            # Defensive fallback - should be unreachable, IDLE always sets
+            # business_id before moving here. Re-derive from the WhatsApp
+            # number if the session was somehow corrupted, same spirit as
+            # the unreachable-state fallback at the bottom of this function.
+            business = get_business_by_phone_number_id(business_phone_number_id)
+
+        services = get_active_services(business)
+        choice = validate_number_choice(text, len(services))
+
+        if choice is None:
+            # Stay in CHOOSING_SERVICE - no set_state() call. This is the
+            # first real instance of "reject and re-ask" instead of
+            # unconditionally advancing on any input.
+            return f"Please reply with a number from 1 to {len(services)}.", True
+
+        chosen_service = services[choice - 1]
+        _redis_client.hset(_session_key(phone), "service_id", chosen_service.id)
         set_state(phone, State.CHOOSING_PROVIDER)
-        return "Got it. Now choose your provider. (Real provider list: Week 2)", True
+        return f"Got it, {chosen_service.name}. Now choose your provider. (Real provider list: Day 10)", True
 
     if current_state == State.CHOOSING_PROVIDER:
         set_state(phone, State.CHOOSING_TIME)

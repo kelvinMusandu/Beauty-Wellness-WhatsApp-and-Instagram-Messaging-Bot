@@ -81,6 +81,22 @@ def extract_message_text(payload):
         return None
 
 
+def extract_business_phone_number_id(payload):
+    """
+    Defensively pull the receiving business's phone_number_id out of a
+    WhatsApp webhook payload - this lives under "metadata", not "messages",
+    so it's present on both message-type and status-type payloads, unlike
+    the other extraction functions above. Identifies which Business a
+    conversation belongs to (Day 8-9).
+    """
+    try:
+        entry = payload.get("entry", [])[0]
+        change = entry.get("changes", [])[0]
+        return change.get("value", {}).get("metadata", {}).get("phone_number_id")
+    except (IndexError, AttributeError, TypeError):
+        return None
+
+
 def send_whatsapp_message(to, text):
     """
     Send a text message via Meta's Graph API.
@@ -182,6 +198,7 @@ def _receive(request):
         # types, so this naturally skips those without a separate check.
         sender = extract_sender_phone(payload)
         text = extract_message_text(payload)
+        business_phone_number_id = extract_business_phone_number_id(payload)
         if message_id and sender:
             # Capture state BEFORE the transition, so the inbound and
             # outbound rows below share the same tag - both belong to the
@@ -196,7 +213,7 @@ def _receive(request):
                 state=state_at_time,
             )
 
-            reply, should_reply = handle_message(sender, text)
+            reply, should_reply = handle_message(sender, text, business_phone_number_id)
             if should_reply:
                 ConversationEvent.objects.create(
                     phone=sender,

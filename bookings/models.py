@@ -9,6 +9,11 @@ class Business(models.Model):
     """
 
     name = models.CharField(max_length=255)
+
+    # Meta's stable phone_number_id (from webhook payload metadata), not the
+    # human-readable display number. The ID is what identifies which
+    # business a conversation belongs to when a message arrives - the same
+    # value used to construct the Graph API send-message URL.
     whatsapp_number = models.CharField(max_length=20, unique=True)
     opens_at = models.TimeField(default="09:00")
     closes_at = models.TimeField(default="18:00")
