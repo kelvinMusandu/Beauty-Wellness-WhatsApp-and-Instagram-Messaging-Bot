@@ -214,4 +214,88 @@ Two separate Redis calls: hset writes the new state, expire resets the TTL count
 refreshed on every write, not just once when the session is created - this is what makes an active 
 conversation immune to expiring mid-flow (each message pushes the 30-minute clock back out) while a 
 customer who genuinely walks away still resets to IDLE after half an hour of silence.
+
+if current_state == State.IDLE:
+    business = get_business_by_phone_number_id(business_phone_number_id)
+
+First thing that happens once a phone number lands in IDLE: figure out which business this 
+conversation belongs to, using the phone_number_id Meta attached to the webhook payload 
+(extracted upstream by extract_business_phone_number_id() in views.py).
+
+
+    if business is None:
+        logger.warning(...)
+        return "Sorry, this number isn't set up yet. Please try again later.", True
+
+If no Business row matches that ID, the flow stops here with an honest error instead of crashing 
+further down when something tries to use business.id. This is best-practises.md #3 in action - 
+treat the external payload as untrusted, don't assume a match exists.
+
+
+    services = get_active_services(business)
+    if not services:
+        return "Sorry, no services are available right now.", True
+
+Same defensive pattern, one layer deeper: the business exists, but maybe it has zero active services 
+configured. Rather than showing an empty numbered list ("Choose a service:\n" with nothing under it), 
+bail with a clear message.
+
+_redis_client.hset(_session_key(phone), "business_id", business.id)
+    set_state(phone, State.CHOOSING_SERVICE)
+    return format_service_list(services), True
+
+Once both checks pass: remember which business this customer is talking to 
+(written into the same Redis hash as state, under the session:{phone} key - 
+this is the business_id field that CHOOSING_SERVICE reads back a moment later), 
+advance the state machine one edge forward (IDLE → CHOOSING_SERVICE), and reply 
+with the formatted list you just had explained. The , True is the should_reply half of the 
+tuple - the bot always replies here, only HUMAN_TAKEOVER returns False.
+
+business_id = _redis_client.hget(_session_key(phone), "business_id")
+    if business_id:
+        business = Business.objects.get(id=business_id)
+    else:
+        business = get_business_by_phone_number_id(business_phone_number_id)
+
+This is the other half of the hset from IDLE - pulling business_id back out of Redis so 
+the same business context survives across the two separate handle_message() calls (one per 
+incoming WhatsApp message; nothing is held in memory between them, Redis is the only thing that 
+persists). The else branch is a fallback that, per the comment, should never actually trigger - 
+IDLE always sets business_id before a customer can reach CHOOSING_SERVICE at all. It exists purely 
+as a second line of defense in case the Redis key somehow got corrupted or expired mid-flow, same 
+philosophy as the exhaustiveness fallback at the very bottom of the function (documented in
+Day 6-7 notes).
+
+services = get_active_services(business)
+    choice = validate_number_choice(text, len(services))
+
+    if choice is None:
+        return f"Please reply with a number from 1 to {len(services)}.", True
+
+Re-fetches the same service list (needed again to validate the number and to look up the chosen one), 
+then hands the customer's raw text to validate_number_choice(). If it comes back None - empty text, 
+non-numeric, or out of range - the function returns here without calling set_state(). That's the whole 
+mechanism for "stay in this state": simply never write a new state to Redis, so the next message that 
+arrives still reads CHOOSING_SERVICE from get_state() and lands in this exact branch again. No special 
+"reject" state was needed - just the absence of a transition.
+
+    chosen_service = services[choice - 1]
+    _redis_client.hset(_session_key(phone), "service_id", chosen_service.id)
+    set_state(phone, State.CHOOSING_PROVIDER)
+    return f"Got it, {chosen_service.name}. Now choose your provider. (Real provider list: Day 10)", True
+
+Valid choice: convert the customer's 1-indexed display number back to a 0-indexed Python list position 
+(choice - 1 - 
+this is exactly why format_service_list() numbered starting at 1, so this line and that 
+one agree on what "1" means), store which service was picked (same pattern as business_id) and 
+advance one more edge (CHOOSING_SERVICE → CHOOSING_PROVIDER). The placeholder text in the reply is 
+an honest admission that CHOOSING_PROVIDER itself isn't built yet - 
+that's tomorrow's (Day 10) work, 
+not hidden or faked today.
+
+The throughline across both blocks: every piece of session data that needs to survive between one 
+WhatsApp message and the next (business_id, service_id, state, previous_state) lives as a field in 
+the same one Redis hash, following the exact grouping rationale your Day 6-7 notes already covered - 
+one key, one expire(), no risk of the pieces drifting out of sync.
+    
 """
