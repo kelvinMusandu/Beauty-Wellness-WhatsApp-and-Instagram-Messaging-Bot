@@ -4,7 +4,9 @@ import redis
 from django.conf import settings
 
 from bookings.booking_flow import (
+    format_provider_list,
     format_service_list,
+    get_active_providers,
     get_active_services,
     get_business_by_phone_number_id,
     validate_number_choice,
@@ -160,13 +162,38 @@ def handle_message(phone, text, business_phone_number_id=None):
             return f"Please reply with a number from 1 to {len(services)}.", True
 
         chosen_service = services[choice - 1]
+
+        providers = get_active_providers(business)
+        if not providers:
+            # Don't commit service_id or advance state - the customer stays
+            # in CHOOSING_SERVICE and can try again later, same as IDLE
+            # bailing out before writing business_id if there are no services.
+            return f"Got it, {chosen_service.name}. Sorry, no providers are available right now. Please try again later.", True
+
         _redis_client.hset(_session_key(phone), "service_id", chosen_service.id)
         set_state(phone, State.CHOOSING_PROVIDER)
-        return f"Got it, {chosen_service.name}. Now choose your provider. (Real provider list: Day 10)", True
+        return format_provider_list(providers), True
 
     if current_state == State.CHOOSING_PROVIDER:
+        business_id = _redis_client.hget(_session_key(phone), "business_id")
+        if business_id:
+            business = Business.objects.get(id=business_id)
+        else:
+            # Same unreachable-in-practice fallback as CHOOSING_SERVICE.
+            business = get_business_by_phone_number_id(business_phone_number_id)
+
+        providers = get_active_providers(business)
+        choice = validate_number_choice(text, len(providers))
+
+        if choice is None:
+            # Stay in CHOOSING_PROVIDER - same reject-and-reask mechanism as
+            # CHOOSING_SERVICE, no set_state() call on an invalid reply.
+            return f"Please reply with a number from 1 to {len(providers)}.", True
+
+        chosen_provider = providers[choice - 1]
+        _redis_client.hset(_session_key(phone), "provider_id", chosen_provider.id)
         set_state(phone, State.CHOOSING_TIME)
-        return "Now let's pick a time. (Real available slots: Week 2)", True
+        return f"Got it, {chosen_provider.name}. Now let's pick a time. (Real available slots: Day 11-12)", True
 
     if current_state == State.CHOOSING_TIME:
         set_state(phone, State.AWAITING_PAYMENT)

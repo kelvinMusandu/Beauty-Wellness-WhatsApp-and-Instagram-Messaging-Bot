@@ -1,4 +1,4 @@
-from .models import Business, Service
+from .models import Business, Provider, Service
 
 
 def get_business_by_phone_number_id(phone_number_id):
@@ -27,6 +27,20 @@ def get_active_services(business):
 def format_service_list(services):
     lines = [f"{i}. {s.name} - KES {s.price}" for i, s in enumerate(services, start=1)]
     return "Welcome! Choose a service:\n" + "\n".join(lines)
+
+
+def get_active_providers(business):
+    """
+    Ordered by id, same rationale as get_active_services - the display
+    numbers shown to a customer must stay stable and repeatable across
+    messages, not just correct at the moment of a single query.
+    """
+    return list(Provider.objects.filter(business=business, is_active=True).order_by("id"))
+
+
+def format_provider_list(providers):
+    lines = [f"{i}. {p.name}" for i, p in enumerate(providers, start=1)]
+    return "Now choose your provider:\n" + "\n".join(lines)
 
 
 def validate_number_choice(text, max_value):
