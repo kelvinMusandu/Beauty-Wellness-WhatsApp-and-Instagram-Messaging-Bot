@@ -7,7 +7,7 @@ no app download required.
 
 Built in public. Follow the build log below.
 
-## Status: Day 8-9 - Foundation + State Machine + Real Service Selection
+## Status: Day 10 - Foundation + State Machine + Real Service & Provider Selection
 
 - [x] Django project scaffolded
 - [x] `webhooks` app receives GET (Meta verification) and POST (event storage)
@@ -19,7 +19,8 @@ Built in public. Follow the build log below.
 - [x] State machine: `IDLE → CHOOSING_SERVICE → CHOOSING_PROVIDER → CHOOSING_TIME → AWAITING_PAYMENT → CONFIRMED`, plus `HUMAN_TAKEOVER` from any state, session stored in Redis (Memurai locally)
 - [x] `ConversationEvent` audit log (both directions) and `resume_bot` management command to restore a customer from `HUMAN_TAKEOVER`
 - [x] `IDLE` and `CHOOSING_SERVICE` driven by real `Business`/`Service` data, not placeholder text - first real input validation (reject invalid replies, re-ask, instead of unconditionally advancing)
-- [ ] Real provider/time selection (Day 10+)
+- [x] `CHOOSING_PROVIDER` driven by real `Provider` data, same validation pattern reused unchanged from service selection
+- [ ] Real time slot selection with interval overlap detection (Day 11-12)
 - [ ] Booking flow (Week 2)
 - [ ] M-Pesa integration (Week 3)
 - [ ] Admin dashboard (Week 3)
@@ -119,3 +120,18 @@ your `WHATSAPP_VERIFY_TOKEN` in the Meta developer dashboard.
   `set_state()` on a bad reply. Verified against a real WhatsApp number tied to
   a real `Business` row with three real services, not just a shell test. DSA
   notes: [week1/day8-9-build-notes-service-selection-dsa.md](../week1/day8-9-build-notes-service-selection-dsa.md).
+- **Day 10:** `CHOOSING_PROVIDER` replaced with real logic - `get_active_providers()`
+  and `format_provider_list()` in `bookings/booking_flow.py`, structurally identical
+  to Day 8-9's service-selection functions, reused unchanged rather than redesigned.
+  `CHOOSING_SERVICE`'s valid-choice branch also changed: it now checks that the
+  business has active providers *before* committing the customer's service choice,
+  so a business with services but no providers never leaves a customer stuck
+  mid-flow holding a saved choice with nowhere to go next. Two real gaps found by
+  testing on an actual phone, logged but deliberately not fixed yet: the numbered
+  list doesn't re-appear on an invalid reply, and there's no self-service way for a
+  customer to restart mid-flow (only paths back to `IDLE` are finishing the booking,
+  an admin clearing the Redis session, or the 30-minute TTL expiring). Verified
+  against a real WhatsApp number: invalid and out-of-range replies both correctly
+  rejected and re-asked, valid service and provider choices both accepted and
+  correctly stored. DSA notes:
+  [week1/day10-build-notes-provider-selection-dsa.md](../week1/day10-build-notes-provider-selection-dsa.md).
