@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 
 import redis
 from django.conf import settings
@@ -6,12 +7,14 @@ from django.conf import settings
 from bookings.booking_flow import (
     format_provider_list,
     format_service_list,
+    format_slot_list,
     get_active_providers,
     get_active_services,
+    get_available_slots,
     get_business_by_phone_number_id,
     validate_number_choice,
 )
-from bookings.models import Business
+from bookings.models import Business, Provider, Service
 
 logger = logging.getLogger(__name__)
 
@@ -191,13 +194,50 @@ def handle_message(phone, text, business_phone_number_id=None):
             return f"Please reply with a number from 1 to {len(providers)}.", True
 
         chosen_provider = providers[choice - 1]
+
+        service_id = _redis_client.hget(_session_key(phone), "service_id")
+        service = Service.objects.get(id=service_id)
+        today = date.today()
+        slots = get_available_slots(business, chosen_provider, service, today)
+
+        if not slots:
+            # Same "check downstream before committing upstream" pattern as
+            # CHOOSING_SERVICE checking for providers - don't commit
+            # provider_id or advance state if there's nothing to book today.
+            return f"Got it, {chosen_provider.name}. Sorry, no times are available today. Please try again tomorrow.", True
+
         _redis_client.hset(_session_key(phone), "provider_id", chosen_provider.id)
         set_state(phone, State.CHOOSING_TIME)
-        return f"Got it, {chosen_provider.name}. Now let's pick a time. (Real available slots: Day 11-12)", True
+        return format_slot_list(slots, today), True
 
     if current_state == State.CHOOSING_TIME:
+        business_id = _redis_client.hget(_session_key(phone), "business_id")
+        if business_id:
+            business = Business.objects.get(id=business_id)
+        else:
+            # Same unreachable-in-practice fallback as CHOOSING_SERVICE/CHOOSING_PROVIDER.
+            business = get_business_by_phone_number_id(business_phone_number_id)
+
+        service_id = _redis_client.hget(_session_key(phone), "service_id")
+        provider_id = _redis_client.hget(_session_key(phone), "provider_id")
+        service = Service.objects.get(id=service_id)
+        provider = Provider.objects.get(id=provider_id)
+
+        today = date.today()
+        slots = get_available_slots(business, provider, service, today)
+        choice = validate_number_choice(text, len(slots))
+
+        if choice is None:
+            # Stay in CHOOSING_TIME - same reject-and-reask mechanism as
+            # every prior selection state, no set_state() call on an
+            # invalid reply.
+            return f"Please reply with a number from 1 to {len(slots)}.", True
+
+        chosen_slot = slots[choice - 1]
+        _redis_client.hset(_session_key(phone), "booking_date", today.isoformat())
+        _redis_client.hset(_session_key(phone), "start_time", chosen_slot.isoformat())
         set_state(phone, State.AWAITING_PAYMENT)
-        return "Almost done. Payment integration comes in Week 3.", True
+        return f"Got it, {chosen_slot.strftime('%H:%M')} today. Almost done - payment integration comes in Week 3.", True
 
     if current_state == State.AWAITING_PAYMENT:
         set_state(phone, State.CONFIRMED)

@@ -7,7 +7,7 @@ no app download required.
 
 Built in public. Follow the build log below.
 
-## Status: Day 10 - Foundation + State Machine + Real Service & Provider Selection
+## Status: Day 11-12 - Foundation + State Machine + Real Service, Provider & Time Selection
 
 - [x] Django project scaffolded
 - [x] `webhooks` app receives GET (Meta verification) and POST (event storage)
@@ -20,7 +20,8 @@ Built in public. Follow the build log below.
 - [x] `ConversationEvent` audit log (both directions) and `resume_bot` management command to restore a customer from `HUMAN_TAKEOVER`
 - [x] `IDLE` and `CHOOSING_SERVICE` driven by real `Business`/`Service` data, not placeholder text - first real input validation (reject invalid replies, re-ask, instead of unconditionally advancing)
 - [x] `CHOOSING_PROVIDER` driven by real `Provider` data, same validation pattern reused unchanged from service selection
-- [ ] Real time slot selection with interval overlap detection (Day 11-12)
+- [x] `CHOOSING_TIME` driven by real available slots, computed dynamically and filtered by interval overlap detection against existing bookings
+- [ ] Booking record actually created + real conflict handling (Day 13)
 - [ ] Booking flow (Week 2)
 - [ ] M-Pesa integration (Week 3)
 - [ ] Admin dashboard (Week 3)
@@ -135,3 +136,23 @@ your `WHATSAPP_VERIFY_TOKEN` in the Meta developer dashboard.
   rejected and re-asked, valid service and provider choices both accepted and
   correctly stored. DSA notes:
   [week1/day10-build-notes-provider-selection-dsa.md](../week1/day10-build-notes-provider-selection-dsa.md).
+- **Day 11-12:** `CHOOSING_TIME` replaced with real logic - `get_available_slots()`
+  in `bookings/booking_flow.py` generates candidate start times across the
+  business's opening hours in 30-minute increments, then filters out any that
+  overlap an existing booking for the chosen provider on that date using the
+  interval overlap condition (`existing.start < requested.end AND existing.end
+  > requested.start`). No `TimeSlot` table exists (a Day 4-5 decision) - every
+  request recomputes availability fresh against real `Booking` rows, nothing
+  is cached or precomputed. `CHOOSING_PROVIDER`'s valid-choice branch also
+  changed: it now checks that at least one slot is available today before
+  committing the customer's provider choice, the same "check downstream
+  before committing upstream" pattern Day 10 established for services and
+  providers, applied one step further. Bookings are scoped to today's date
+  only - no date-selection state exists yet, a deliberate simplification the
+  roadmap itself doesn't ask for at this stage. Verified against real existing
+  data, not a synthetic test: a genuine `Booking` row left over from Day 4-5's
+  verification (14:00-15:00, confirmed) correctly excluded three 30-minute
+  candidates that overlapped it while leaving the slots immediately before and
+  after available, confirmed against both a live WhatsApp test and the actual
+  `ConversationEvent` log. DSA notes:
+  [week1/day11-12-build-notes-time-selection-dsa.md](../week1/day11-12-build-notes-time-selection-dsa.md).

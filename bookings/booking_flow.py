@@ -1,4 +1,8 @@
-from .models import Business, Provider, Service
+from datetime import datetime, timedelta
+
+from .models import Booking, Business, Provider, Service
+
+SLOT_INTERVAL_MINUTES = 30
 
 
 def get_business_by_phone_number_id(phone_number_id):
@@ -41,6 +45,94 @@ def get_active_providers(business):
 def format_provider_list(providers):
     lines = [f"{i}. {p.name}" for i, p in enumerate(providers, start=1)]
     return "Now choose your provider:\n" + "\n".join(lines)
+
+
+def get_available_slots(business, provider, service, on_date):
+    """
+    Generates candidate start times between the business's opening and
+    closing time, spaced SLOT_INTERVAL_MINUTES apart, then filters out any
+    that would overlap an existing booking for this provider on this date -
+    interval overlap detection (week2/day1-interval-overlap.md). No
+    TimeSlot table exists (a Day 4-5 decision) - slots are computed fresh on
+    every request, not read back from stored rows.
+    """
+    duration = timedelta(minutes=service.duration_minutes)
+    # timedelta is Python's representation of a span of time 
+    # (as opposed to a specific point in time). service.duration_minutes is a 
+    # plain integer field on the model (e.g. 60); wrapping it in 
+    # timedelta(minutes=...) turns that integer into something you can 
+    # actually add to or subtract from a datetime a few lines down.
+
+    current = datetime.combine(on_date, business.opens_at)
+    closing = datetime.combine(on_date, business.closes_at)
+    # on_date is a date (just a calendar day, no time-of-day). 
+    # business.opens_at/closes_at are TimeFields (just a time-of-day, 
+    # no calendar day). Neither on its own is enough to do arithmetic with - 
+    # you can't sensibly add "30 minutes" to a bare date, and a bare time has no 
+    # sense of "the next day" if it rolls over. datetime.combine(date, time) 
+    # glues the two into one full datetime - e.g. date(2026, 7, 15) + time(9, 0) 
+    # → datetime(2026, 7, 15, 9, 0). Now both current and closing are full 
+    # datetimes you can subtract, compare and add timedeltas to.
+
+    slots = []
+    while current + duration <= closing:
+        start_time = current.time()
+        end_time = (current + duration).time()
+        if not _has_conflict(provider, on_date, start_time, end_time):
+            slots.append(start_time)
+        # For this specific candidate window, ask _has_conflict() 
+        # (explained below) whether it overlaps an existing booking for 
+        # this provider on this date. Only append it to slots if the answer 
+        # is no - a rejected candidate is simply never added, not marked or flagged.
+
+        current += timedelta(minutes=SLOT_INTERVAL_MINUTES)
+        # Advances the loop by 30 minutes and goes back to the while check. 
+        # current += timedelta(...) is shorthand for current = current + 
+        # timedelta(...) - datetimes support +/+= with timedeltas directly, one 
+        # of the reasons datetime.combine() was needed earlier rather than juggling 
+        # separate date/time values through the whole loop.
+
+    return slots
+
+
+def _has_conflict(provider, on_date, start_time, end_time):
+    """
+    Interval overlap: existing.start < requested.end AND existing.end >
+    requested.start. Cancelled bookings don't block a slot - only ones that
+    could still become real do.
+    """
+    return (
+        Booking.objects.filter(provider=provider, date=on_date)
+        .exclude(status=Booking.Status.CANCELLED)
+        .filter(start_time__lt=end_time, end_time__gt=start_time)
+        .exists()
+        # .filter(provider=provider, date=on_date) - only bookings for 
+        # this specific stylist, on this specific day. Everything else is 
+        # irrelevant to whether this candidate slot is free.
+
+        # .exclude(status=Booking.Status.CANCELLED) - a cancelled booking doesn't 
+        # actually occupy the calendar anymore, so it shouldn't block a slot. 
+        # Everything else (pending, awaiting_payment, confirmed, completed) 
+        # still counts as "occupying time."
+
+        # .filter(start_time__lt=end_time, end_time__gt=start_time) - this is 
+        # the actual interval overlap condition from your DSA notes: 
+        # existing.start < requested.end AND existing.end > requested.start. 
+        # Django ANDs multiple conditions in one .filter() call by default, 
+        # so this single line expresses both halves of the formula. __lt and __gt 
+        # are Django's field-lookup suffixes for "less than" and "greater than" - 
+        # there's no </> operator usable directly on ORM fields, so Django uses 
+        # these string suffixes instead.
+
+        # .exists() — runs an efficient SELECT 1 ... LIMIT 1-style check against 
+        # the database and returns a plain True/False, rather than fetching full 
+        # rows just to check whether any exist.
+    )
+
+
+def format_slot_list(slots, on_date):
+    lines = [f"{i}. {slot.strftime('%H:%M')}" for i, slot in enumerate(slots, start=1)]
+    return f"Choose a time for {on_date.strftime('%A, %d %b')}:\n" + "\n".join(lines)
 
 
 def validate_number_choice(text, max_value):
